@@ -2,11 +2,11 @@ package me.sparklee.phantomplayers.presentation;
 
 import com.destroystokyo.paper.event.server.PaperServerListPingEvent;
 import me.sparklee.phantomplayers.config.Settings;
-import me.sparklee.phantomplayers.identity.FakeIdentity;
 import me.sparklee.phantomplayers.identity.IdentityManager;
 import me.sparklee.phantomplayers.population.PopulationRegistry;
 import me.sparklee.phantomplayers.population.StatusCounter;
 import me.sparklee.phantomplayers.population.StatusSample;
+import me.sparklee.phantomplayers.population.StatusSampleCache;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -20,6 +20,7 @@ public final class StatusListener implements Listener {
     private final Supplier<Settings> settings;
     private final PopulationRegistry registry;
     private final IdentityManager identities;
+    private final StatusSampleCache sampleCache = new StatusSampleCache();
 
     public StatusListener(Supplier<Settings> settings, PopulationRegistry registry, IdentityManager identities) {
         this.settings = settings;
@@ -29,7 +30,7 @@ public final class StatusListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH)
     public void onServerListPing(PaperServerListPingEvent event) {
-        Settings.ServerStatus status = settings.get().serverStatus();
+        Settings.ServerList status = settings.get().serverList();
         if (!status.enabled()) {
             return;
         }
@@ -39,25 +40,20 @@ public final class StatusListener implements Listener {
                 realSamples.add(new StatusSample(listed.name(), listed.id()));
             }
         }
-        List<StatusSample> activeSamples = new ArrayList<>();
-        for (var fake : registry.snapshot()) {
-            activeSamples.add(new StatusSample(fake.identity().name(), fake.identity().uuid()));
-        }
-        List<StatusSample> configuredSamples = new ArrayList<>();
-        for (FakeIdentity identity : identities.enabled()) {
-            configuredSamples.add(new StatusSample(identity.name(), identity.uuid()));
-        }
+        List<StatusSample> activeSamples = sampleCache.active(registry);
+        List<StatusSample> configuredSamples = sampleCache.configured(identities);
 
         StatusCounter.Plan plan = StatusCounter.plan(status.countMode(), event.getNumPlayers(), realSamples,
-                activeSamples, configuredSamples, status.sampleEnabled(), status.includeRealPlayers(),
-                status.maxSampleEntries());
+                activeSamples, configuredSamples, status.includeFakeCount(), status.includeFakeSampleNames(),
+                status.includeRealPlayers(), status.sampleSize());
         event.setNumPlayers(plan.totalCount());
-        if (status.sampleEnabled()) {
-            List<PaperServerListPingEvent.ListedPlayerInfo> listed = event.getListedPlayers();
-            listed.clear();
-            for (StatusSample sample : plan.samples()) {
-                listed.add(new PaperServerListPingEvent.ListedPlayerInfo(sample.name(), sample.id()));
-            }
+        if (!status.sampleEnabled()) {
+            return;
+        }
+        List<PaperServerListPingEvent.ListedPlayerInfo> listed = event.getListedPlayers();
+        listed.clear();
+        for (StatusSample sample : plan.samples()) {
+            listed.add(new PaperServerListPingEvent.ListedPlayerInfo(sample.name(), sample.id()));
         }
     }
 }

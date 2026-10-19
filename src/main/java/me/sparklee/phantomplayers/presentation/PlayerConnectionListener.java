@@ -18,7 +18,7 @@ public final class PlayerConnectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent event) {
-        presentation.resyncViewer(event.getPlayer());
+        presentation.onViewerJoin(event.getPlayer());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

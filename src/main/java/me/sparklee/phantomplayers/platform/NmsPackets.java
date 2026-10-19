@@ -28,6 +28,6 @@ public interface NmsPackets {
 
     String description();
 
-    record TabEntry(UUID uuid, String name, SkinData skin, boolean listed) {
+    record TabEntry(UUID uuid, String name, SkinData skin, boolean listed, int latency) {
     }
 }

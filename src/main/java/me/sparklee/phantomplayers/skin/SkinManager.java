@@ -11,6 +11,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -20,6 +21,8 @@ import java.util.function.Supplier;
  */
 public final class SkinManager implements AutoCloseable {
 
+    private static final long MAX_BACKOFF_MILLIS = 30_000L;
+
     private final ProfileCache cache;
     private final ProfileLookup lookup;
     private final Executor executor;
@@ -28,16 +31,23 @@ public final class SkinManager implements AutoCloseable {
     private final Supplier<SkinData> fallback;
     private final Consumer<String> warnings;
     private final Runnable cacheChanged;
+    private final int retryAttempts;
+    private final long retryBackoffMillis;
+    private final LongConsumer backoffSleeper;
     private final Map<String, CompletableFuture<SkinData>> inFlight = new ConcurrentHashMap<>();
     private final AtomicBoolean closed = new AtomicBoolean();
 
     public SkinManager(ProfileCache cache, ProfileLookup lookup, Executor executor, int maxConcurrentRequests,
+                       int retryAttempts, long retryBackoffMillis, LongConsumer backoffSleeper,
                        LongSupplier clock, Supplier<SkinData> fallback, Consumer<String> warnings,
                        Runnable cacheChanged) {
         this.cache = cache;
         this.lookup = lookup;
         this.executor = executor;
         this.permits = new Semaphore(Math.max(1, maxConcurrentRequests));
+        this.retryAttempts = Math.max(0, retryAttempts);
+        this.retryBackoffMillis = Math.max(0L, retryBackoffMillis);
+        this.backoffSleeper = backoffSleeper;
         this.clock = clock;
         this.fallback = fallback;
         this.warnings = warnings;
@@ -97,15 +107,16 @@ public final class SkinManager implements AutoCloseable {
                 return;
             }
 
-            LookupOutcome outcome;
-            try {
-                outcome = lookup.lookup(username);
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                outcome = LookupOutcome.error("interrupted");
-            } catch (Exception exception) {
-                outcome = LookupOutcome.error(exception.getClass().getSimpleName()
-                        + (exception.getMessage() == null ? "" : ": " + exception.getMessage()));
+            LookupOutcome outcome = attemptLookup(username);
+            int retries = 0;
+            while (outcome.status() == LookupStatus.ERROR && retries < retryAttempts
+                    && !closed.get() && !Thread.currentThread().isInterrupted()) {
+                retries++;
+                sleepBackoff(Math.min(MAX_BACKOFF_MILLIS, retryBackoffMillis << (retries - 1)));
+                if (Thread.currentThread().isInterrupted()) {
+                    break;
+                }
+                outcome = attemptLookup(username);
             }
 
             SkinData stored = outcome.status() == LookupStatus.FOUND ? outcome.skin() : SkinData.EMPTY;
@@ -130,8 +141,30 @@ public final class SkinManager implements AutoCloseable {
         }
     }
 
+    private LookupOutcome attemptLookup(String username) {
+        try {
+            return lookup.lookup(username);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return LookupOutcome.error("interrupted");
+        } catch (Exception exception) {
+            return LookupOutcome.error(exception.getClass().getSimpleName()
+                    + (exception.getMessage() == null ? "" : ": " + exception.getMessage()));
+        }
+    }
+
     private SkinData render(SkinData skin) {
         return skin != null && skin.hasTexture() ? skin : fallback.get();
+    }
+
+    private void sleepBackoff(long millis) {
+        if (millis <= 0L) {
+            return;
+        }
+        try {
+            backoffSleeper.accept(millis);
+        } catch (RuntimeException ignored) {
+        }
     }
 
     @Override

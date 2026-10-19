@@ -310,7 +310,8 @@ public final class MojmapPackets implements NmsPackets {
     private Object createEntry(TabEntry entry) {
         try {
             Object profile = createProfile(entry);
-            return entryConstructor.newInstance(entry.uuid(), profile, entry.listed(), 0, survival, null, false, 0, null);
+            return entryConstructor.newInstance(entry.uuid(), profile, entry.listed(),
+                    Math.max(0, entry.latency()), survival, null, false, 0, null);
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException("Unable to construct player-info entry for " + entry.name(), exception);
         }

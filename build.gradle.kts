@@ -9,14 +9,18 @@ description = "Advanced fake-player population plugin for Paper and Folia"
 repositories {
     mavenCentral()
     maven("https://repo.papermc.io/repository/maven-public/")
+    maven("https://repo.extendedclip.com/content/repositories/placeholderapi/")
 }
 
 val paperApiVersion = "1.21.11-R0.1-SNAPSHOT"
+val placeholderApiVersion = "2.11.6"
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:$paperApiVersion")
+    compileOnly("me.clip:placeholderapi:$placeholderApiVersion")
 
     testImplementation("io.papermc.paper:paper-api:$paperApiVersion")
+    testImplementation("me.clip:placeholderapi:$placeholderApiVersion")
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
@@ -69,6 +73,7 @@ val verifySourceSets = verifyTargets.associate { (name, platformDependency) ->
         java.setSrcDirs(listOf("src/main/java"))
     }
     dependencies.add(sourceSet.compileOnlyConfigurationName, platformDependency)
+    dependencies.add(sourceSet.compileOnlyConfigurationName, "me.clip:placeholderapi:$placeholderApiVersion")
     name to sourceSet
 }
 

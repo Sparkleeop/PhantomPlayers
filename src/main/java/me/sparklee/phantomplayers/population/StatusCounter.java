@@ -18,22 +18,16 @@ public final class StatusCounter {
 
     public static Plan plan(StatusCountMode mode, int realCount, List<StatusSample> realSamples,
                             List<StatusSample> activeSamples, List<StatusSample> configuredSamples,
-                            boolean sampleEnabled, boolean includeRealPlayers, int maxSampleEntries) {
-        int fakeCount = switch (mode) {
-            case ACTIVE -> activeSamples.size();
-            case CONFIGURED -> configuredSamples.size();
-            case DISABLED -> 0;
-        };
+                            boolean includeFakeCount, boolean includeFakeSamples, boolean includeRealPlayers,
+                            int maxSampleEntries) {
+        int fakeCount = includeFakeCount ? fakeSource(mode, activeSamples, configuredSamples).size() : 0;
         int total = Math.max(0, realCount) + fakeCount;
-        if (!sampleEnabled || maxSampleEntries <= 0) {
+        if (maxSampleEntries <= 0 || !includeRealPlayers && !includeFakeSamples) {
             return new Plan(total, fakeCount, List.of());
         }
 
-        List<StatusSample> fakeSource = switch (mode) {
-            case ACTIVE -> activeSamples;
-            case CONFIGURED -> configuredSamples;
-            case DISABLED -> List.of();
-        };
+        List<StatusSample> fakeSource = includeFakeSamples
+                ? fakeSource(mode, activeSamples, configuredSamples) : List.of();
         Map<String, StatusSample> unique = new LinkedHashMap<>();
         for (StatusSample sample : fakeSource) {
             if (unique.size() >= maxSampleEntries) {
@@ -42,7 +36,8 @@ public final class StatusCounter {
             unique.putIfAbsent(sample.name().toLowerCase(Locale.ROOT), sample);
         }
         if (includeRealPlayers) {
-            for (StatusSample sample : realSamples) {
+            List<StatusSample> realSource = realSamples == null ? List.of() : realSamples;
+            for (StatusSample sample : realSource) {
                 if (unique.size() >= maxSampleEntries) {
                     break;
                 }
@@ -50,5 +45,14 @@ public final class StatusCounter {
             }
         }
         return new Plan(total, fakeCount, List.copyOf(unique.values()));
+    }
+
+    private static List<StatusSample> fakeSource(StatusCountMode mode, List<StatusSample> activeSamples,
+                                                 List<StatusSample> configuredSamples) {
+        return switch (mode) {
+            case ACTIVE -> activeSamples == null ? List.of() : activeSamples;
+            case CONFIGURED -> configuredSamples == null ? List.of() : configuredSamples;
+            case DISABLED -> List.of();
+        };
     }
 }

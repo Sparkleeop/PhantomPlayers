@@ -5,7 +5,10 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.Plugin;
+
+import java.util.logging.Level;
 
 public final class PaperSchedulerService implements SchedulerService {
 
@@ -41,8 +44,26 @@ public final class PaperSchedulerService implements SchedulerService {
 
     @Override
     public Cancellable runForPlayer(Player player, Runnable task) {
-        return wrap(player.getScheduler().run(plugin, scheduled -> task.run(), () -> {
-        }));
+        try {
+            ScheduledTask scheduled = player.getScheduler().run(plugin, ignored -> task.run(), () -> {
+            });
+            if (scheduled != null) {
+                return wrap(scheduled);
+            }
+        } catch (IllegalPluginAccessException disabled) {
+            return Cancellable.NOOP;
+        } catch (RuntimeException exception) {
+            plugin.getLogger().log(Level.WARNING, "Unable to schedule an entity task for "
+                    + player.getName() + "; retrying on the global scheduler", exception);
+        }
+        if (!player.isOnline()) {
+            return Cancellable.NOOP;
+        }
+        try {
+            return runGlobal(task);
+        } catch (IllegalPluginAccessException disabled) {
+            return Cancellable.NOOP;
+        }
     }
 
     @Override

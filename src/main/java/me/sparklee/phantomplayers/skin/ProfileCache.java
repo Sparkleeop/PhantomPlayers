@@ -8,11 +8,16 @@ import java.util.Optional;
 
 public final class ProfileCache {
 
-    private final long successTtlMillis;
-    private final long negativeTtlMillis;
+    private long successTtlMillis;
+    private long negativeTtlMillis;
     private final Map<String, CacheEntry> entries = new HashMap<>();
 
     public ProfileCache(long successTtlMillis, long negativeTtlMillis) {
+        this.successTtlMillis = Math.max(0L, successTtlMillis);
+        this.negativeTtlMillis = Math.max(0L, negativeTtlMillis);
+    }
+
+    public synchronized void setTtls(long successTtlMillis, long negativeTtlMillis) {
         this.successTtlMillis = Math.max(0L, successTtlMillis);
         this.negativeTtlMillis = Math.max(0L, negativeTtlMillis);
     }

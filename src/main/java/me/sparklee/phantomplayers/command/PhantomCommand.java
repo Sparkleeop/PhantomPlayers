@@ -121,6 +121,11 @@ public final class PhantomCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(Text.info("Adapter: " + plugin.packets().description()));
         sender.sendMessage(Text.info("Chat: " + (plugin.chatManager().isRunning() ? "running" : "disabled")
                 + "  |  " + plugin.chatManager().config().templates().size() + " templates"));
+        sender.sendMessage(Text.info("Ping: " + pingSummary(plugin.settings().ping())
+                + "  |  Server list: " + (plugin.settings().serverList().enabled()
+                ? plugin.settings().serverList().countMode().configName() : "disabled")
+                + "  |  PlaceholderAPI: " + plugin.placeholders().describe()));
+        sender.sendMessage(Text.info("Join/quit messages: " + plugin.presentation().joinQuit().describe()));
 
         if (page == 0) {
             if (!active.isEmpty()) {
@@ -142,6 +147,14 @@ public final class PhantomCommand implements CommandExecutor, TabCompleter {
                     + fake.location().world() + " " + Math.round(fake.location().x()) + ", "
                     + Math.round(fake.location().y()) + ", " + Math.round(fake.location().z())));
         }
+    }
+
+    private static String pingSummary(me.sparklee.phantomplayers.config.Settings.Ping ping) {
+        if (!ping.enabled()) {
+            return "disabled";
+        }
+        return ping.minimumMs() + "-" + ping.maximumMs() + "ms"
+                + (ping.variationEnabled() ? " varying" : " fixed");
     }
 
     private void usage(CommandSender sender) {

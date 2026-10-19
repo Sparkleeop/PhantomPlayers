@@ -3,6 +3,7 @@ version: '1.0.0'
 main: me.sparklee.phantomplayers.PhantomPlayers
 api-version: '1.21'
 folia-supported: true
+softdepend: [PlaceholderAPI]
 description: Configuration-driven fake-player population for Paper and Folia.
 author: sparklee
 commands:

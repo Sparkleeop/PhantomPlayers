@@ -7,7 +7,8 @@ public record Settings(
         Population population,
         Presentation presentation,
         Profiles profiles,
-        ServerStatus serverStatus,
+        Ping ping,
+        ServerList serverList,
         Chat chat,
         Compatibility compatibility
 ) {
@@ -45,6 +46,8 @@ public record Settings(
             long negativeCacheMinutes,
             int requestTimeoutSeconds,
             int maxConcurrentRequests,
+            int retryAttempts,
+            long retryBackoffMillis,
             SkinData fallbackSkin
     ) {
         public long cacheTtlMillis() {
@@ -56,12 +59,31 @@ public record Settings(
         }
     }
 
-    public record ServerStatus(
+    public record Ping(
             boolean enabled,
+            int minimumMs,
+            int maximumMs,
+            int updateIntervalSeconds,
+            boolean randomizePerPlayer,
+            boolean variationEnabled
+    ) {
+        public int range() {
+            return maximumMs - minimumMs + 1;
+        }
+
+        public boolean canRun() {
+            return enabled && maximumMs >= minimumMs;
+        }
+    }
+
+    public record ServerList(
+            boolean enabled,
+            boolean includeFakeCount,
+            boolean includeFakeSampleNames,
             StatusCountMode countMode,
-            boolean sampleEnabled,
             boolean includeRealPlayers,
-            int maxSampleEntries
+            boolean sampleEnabled,
+            int sampleSize
     ) {
     }
 
@@ -83,8 +105,9 @@ public record Settings(
                         new ConsoleSpawn("world", 0.0D, 64.0D, 0.0D, 0.0F, 0.0F)
                 ),
                 new Presentation(true, 96.0D, 200L, true, true),
-                new Profiles(true, 168L, 10L, 5, 2, SkinData.EMPTY),
-                new ServerStatus(true, StatusCountMode.ACTIVE, true, true, 12),
+                new Profiles(true, 168L, 10L, 5, 2, 2, 1_500L, SkinData.EMPTY),
+                new Ping(true, 20, 220, 30, true, true),
+                new ServerList(true, true, true, StatusCountMode.ACTIVE, true, true, 12),
                 new Chat(true),
                 new Compatibility(true)
         );

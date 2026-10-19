@@ -2,6 +2,7 @@ package me.sparklee.phantomplayers.presentation;
 
 import me.sparklee.phantomplayers.config.Settings;
 import me.sparklee.phantomplayers.names.NameRules;
+import me.sparklee.phantomplayers.ping.PingManager;
 import me.sparklee.phantomplayers.platform.Cancellable;
 import me.sparklee.phantomplayers.platform.NmsPackets;
 import me.sparklee.phantomplayers.platform.SchedulerService;
@@ -21,6 +22,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -41,6 +43,8 @@ public final class PresentationManager {
     private final NmsPackets packets;
     private final SchedulerService scheduler;
     private final SkinService skins;
+    private final PingManager pings;
+    private final JoinQuitCompatibility joinQuit = new JoinQuitCompatibility();
     private final Map<String, Entry> entries = new ConcurrentHashMap<>();
     private final AtomicBoolean syncRunning = new AtomicBoolean();
 
@@ -55,6 +59,8 @@ public final class PresentationManager {
         this.scheduler = scheduler;
         this.skins = skins;
         this.settings = settings;
+        this.pings = new PingManager(scheduler::runGlobalLater, this::onPingChanged, new Random());
+        this.pings.apply(settings.ping());
     }
 
     public void start() {
@@ -67,6 +73,7 @@ public final class PresentationManager {
     }
 
     public void stop() {
+        pings.stop();
         if (syncTask != null) {
             syncTask.cancel();
             syncTask = null;
@@ -103,6 +110,16 @@ public final class PresentationManager {
                 entries.values().forEach(entry -> entry.falling = false);
             }
         }
+        if (!previous.ping().equals(next.ping())) {
+            pings.apply(next.ping());
+            List<Entry> all = new ArrayList<>(entries.values());
+            for (Entry entry : all) {
+                entry.latency = pings.allocate(entry.fake.identity().name());
+            }
+            if (!all.isEmpty()) {
+                sendTab(all);
+            }
+        }
     }
 
     public boolean isPresented(String name) {
@@ -118,11 +135,15 @@ public final class PresentationManager {
             String key = NameRules.key(fake.identity().name());
             Entry entry = new Entry(fake, skins.cached(fake.identity().name()));
             if (entries.putIfAbsent(key, entry) == null) {
+                entry.latency = pings.allocate(fake.identity().name());
                 added.add(entry);
             }
         }
         if (added.isEmpty()) {
             return;
+        }
+        for (Entry entry : added) {
+            joinQuit.recordSpawn(entry.fake.identity().name());
         }
         sendTab(added);
         for (Entry entry : added) {
@@ -141,6 +162,8 @@ public final class PresentationManager {
             if (entry != null) {
                 removed.add(entry);
                 ids.add(entry.fake.identity().uuid());
+                joinQuit.recordDespawn(entry.fake.identity().name());
+                pings.forget(entry.fake.identity().name());
             }
         }
         if (removed.isEmpty()) {
@@ -148,7 +171,7 @@ public final class PresentationManager {
         }
         Object removePacket = packets.tabRemove(ids);
         for (Player viewer : Bukkit.getOnlinePlayers()) {
-            scheduleTab(viewer, removePacket);
+            sendTabTo(viewer, removePacket);
         }
         for (Entry entry : removed) {
             int entityId = entry.entityId.get();
@@ -209,18 +232,53 @@ public final class PresentationManager {
         if (snapshot.isEmpty()) {
             return;
         }
-        Object tabPacket = buildTab(snapshot);
-        scheduler.runForPlayer(viewer, () -> {
-            if (viewer.isOnline()) {
-                packets.send(viewer, tabPacket);
-                reconcile(viewer, snapshot);
-            }
-        });
+        sendTabTo(viewer, buildTab(snapshot));
+        scheduleReconcile(viewer, snapshot);
     }
 
     public void resyncViewer(Player viewer) {
         forgetViewer(viewer.getUniqueId());
         syncViewer(viewer);
+    }
+
+    /**
+     * Re-asserts the player-info entries and virtual entities right away and a few more times
+     * shortly after the client has spawned. Three things can otherwise lose the presentation for
+     * a rejoining player: the entity scheduler is not running yet during the join event, the
+     * client is still loading chunks when entity packets arrive, and the server's own initial
+     * player-info packet is sent after {@link PlayerJoinEvent}.
+     */
+    public void onViewerJoin(Player viewer) {
+        resyncViewer(viewer);
+        JoinResync.schedule(scheduler, viewer, () -> retryViewerJoin(viewer),
+                exception -> warn("schedule join retry for " + viewer.getName(), exception));
+    }
+
+    private void retryViewerJoin(Player viewer) {
+        if (!viewer.isOnline()) {
+            return;
+        }
+        List<Entry> snapshot = List.copyOf(entries.values());
+        if (snapshot.isEmpty()) {
+            return;
+        }
+        sendTabTo(viewer, buildTab(snapshot));
+        // Clear the membership outside the entity task so a dropped task still lets the periodic
+        // reconciliation re-add the entities instead of believing the viewer already has them.
+        forgetViewer(viewer.getUniqueId());
+        scheduleReconcile(viewer, snapshot);
+    }
+
+    private void scheduleReconcile(Player viewer, List<Entry> snapshot) {
+        try {
+            scheduler.runForPlayer(viewer, () -> {
+                if (viewer.isOnline()) {
+                    reconcile(viewer, snapshot);
+                }
+            });
+        } catch (RuntimeException exception) {
+            warn("schedule reconciliation for " + viewer.getName(), exception);
+        }
     }
 
     public void forgetViewer(UUID viewerId) {
@@ -240,12 +298,8 @@ public final class PresentationManager {
             }
             Object tabPacket = buildTab(snapshot);
             for (Player viewer : Bukkit.getOnlinePlayers()) {
-                scheduleTab(viewer, tabPacket);
-                scheduler.runForPlayer(viewer, () -> {
-                    if (viewer.isOnline()) {
-                        reconcile(viewer, snapshot);
-                    }
-                });
+                sendTabTo(viewer, tabPacket);
+                scheduleReconcile(viewer, snapshot);
             }
             for (Entry entry : snapshot) {
                 if (entry.entityId.get() <= 0) {
@@ -388,7 +442,7 @@ public final class PresentationManager {
         }
         Object packet = buildTab(snapshot);
         for (Player viewer : Bukkit.getOnlinePlayers()) {
-            scheduleTab(viewer, packet);
+            sendTabTo(viewer, packet);
         }
     }
 
@@ -397,17 +451,41 @@ public final class PresentationManager {
         boolean listed = settings.presentation().tabList();
         for (Entry entry : snapshot) {
             profiles.add(new NmsPackets.TabEntry(entry.fake.identity().uuid(), entry.fake.identity().name(),
-                    entry.skin, listed));
+                    entry.skin, listed, entry.latency));
         }
         return packets.tabUpsert(profiles);
     }
 
-    private void scheduleTab(Player viewer, Object packet) {
-        scheduler.runForPlayer(viewer, () -> {
-            if (viewer.isOnline()) {
-                packets.send(viewer, packet);
+    private void onPingChanged(Collection<String> names) {
+        if (names.isEmpty()) {
+            return;
+        }
+        List<Entry> updated = new ArrayList<>(names.size());
+        for (String key : names) {
+            Entry entry = entries.get(key);
+            if (entry != null) {
+                entry.latency = pings.current(entry.fake.identity().name());
+                updated.add(entry);
             }
-        });
+        }
+        if (!updated.isEmpty()) {
+            sendTab(updated);
+        }
+    }
+
+    /**
+     * Player-info packets are written on the connection's netty thread, so they can be sent from
+     * any thread and must not depend on a player entity scheduler being ready.
+     */
+    private void sendTabTo(Player viewer, Object packet) {
+        if (!viewer.isOnline()) {
+            return;
+        }
+        try {
+            packets.send(viewer, packet);
+        } catch (RuntimeException exception) {
+            warn("send player-info update to " + viewer.getName(), exception);
+        }
     }
 
     private void scheduleEntitySend(Player viewer, Object packet) {
@@ -503,11 +581,25 @@ public final class PresentationManager {
         return new Location(world, entry.x, entry.y, entry.z, entry.yaw, entry.pitch);
     }
 
+    private void warn(String action, RuntimeException exception) {
+        plugin.getLogger().warning("Unable to " + action + ": " + exception.getClass().getSimpleName()
+                + (exception.getMessage() == null ? "" : ": " + exception.getMessage()));
+    }
+
+    public JoinQuitCompatibility joinQuit() {
+        return joinQuit;
+    }
+
+    public PingManager pings() {
+        return pings;
+    }
+
     private static final class Entry {
         private final ActiveFakePlayer fake;
         private final AtomicInteger entityId = new AtomicInteger(-1);
         private final Set<UUID> viewers = ConcurrentHashMap.newKeySet();
         private volatile SkinData skin;
+        private volatile int latency;
         private volatile double x;
         private volatile double y;
         private volatile double z;

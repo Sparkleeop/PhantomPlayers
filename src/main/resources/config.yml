@@ -63,6 +63,12 @@ profiles:
   request-timeout-seconds: 5
   max-concurrent-requests: 2
 
+  # Transient lookup failures (timeouts, rate limits, connection errors) are
+  # retried with exponential backoff before a negative result is cached.
+  # Set retry-attempts to 0 to disable retries.
+  retry-attempts: 2
+  retry-backoff-millis: 1500
+
   # Optional fallback texture (base64 "value" and "signature" from a signed
   # textures property). Leave empty to let the client render its default
   # Steve/Alex skin when a lookup fails.
@@ -70,21 +76,52 @@ profiles:
     value: ""
     signature: ""
 
-server-status:
+# Randomized TAB ping for fake players. The listed-player sample of the
+# server-browser response cannot carry ping values (vanilla protocol), so
+# this only affects the in-game TAB list.
+ping:
+  enabled: true
+
+  # Inclusive range in milliseconds. Values should stay above 0 so the client
+  # renders a ping icon instead of "no connection".
+  minimum-ms: 20
+  maximum-ms: 220
+
+  # How often each assigned value may drift within the configured range.
+  update-interval-seconds: 30
+
+  # true  = every fake player gets its own value (distinct when the range
+  #         allows it); false = all fake players share one value.
+  randomize-per-player: true
+
+  # Periodically change assigned values by a small randomized amount while
+  # keeping them inside the configured range.
+  variation-enabled: true
+
+# Server-browser status response. The legacy "server-status" section with the
+# same semantics (and its nested "sample" section) is still accepted.
+server-list:
   enabled: true
 
   # active     = real online players + currently active fake players
   # configured = real online players + all enabled saved identities
   # disabled   = real online players only
-  count-mode: active
+  count-mode: ACTIVE
 
-  sample:
-    enabled: true
-    # Keep the real players already supplied by the server in the sample.
-    include-real-players: true
-    # Maximum number of sample entries. The vanilla client only renders a
-    # small subset; values above 12 are not useful.
-    max-entries: 12
+  # Add the fake-player count to the displayed online count. The server's
+  # configured max-players value is never modified.
+  include-fake-count: true
+
+  # Allow fake player names in the hover sample. When false, the sample can
+  # still contain real players.
+  include-fake-sample-names: true
+
+  # Keep the real players already supplied by the server in the sample.
+  include-real-players: true
+
+  # Maximum number of sample entries. The vanilla client only renders a
+  # small subset; values above 12 are not useful. 0 clears the sample.
+  sample-size: 12
 
 chat:
   # Simulated lines are delivered as plain server chat broadcasts. They are

@@ -52,15 +52,21 @@ public final class SkinService implements AutoCloseable {
         if (closed) {
             return;
         }
+        SkinManager old = manager.get();
+        if (old != null && next.equals(profiles)) {
+            return;
+        }
         saveNow();
-        SkinManager old = manager.getAndSet(null);
+        manager.set(null);
         if (old != null) {
             old.close();
         }
         this.profiles = next;
         this.fallback = next.fallbackSkin();
 
-        ProfileCache cache = loadCache(next);
+        ProfileCache cache = old != null ? old.cache() : loadCache(next);
+        cache.setTtls(next.cacheTtlMillis(), next.negativeCacheMillis());
+        cache.prune(System.currentTimeMillis());
         ProfileLookup lookup;
         if (next.enabled()) {
             lookup = new MojangProfileLookup(next.requestTimeoutSeconds(), "PhantomPlayers/1.0.0");
@@ -75,8 +81,17 @@ public final class SkinService implements AutoCloseable {
         };
         ExecutorService executor = Executors.newFixedThreadPool(next.maxConcurrentRequests(), factory);
         SkinManager created = new SkinManager(cache, lookup, executor, next.maxConcurrentRequests(),
+                next.retryAttempts(), next.retryBackoffMillis(), SkinService::sleepUnchecked,
                 System::currentTimeMillis, () -> fallback, this::onLookupWarning, this::scheduleSave);
         manager.set(created);
+    }
+
+    private static void sleepUnchecked(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     public CompletableFuture<SkinData> resolve(String username) {

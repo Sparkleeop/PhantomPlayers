@@ -51,4 +51,15 @@ class ProfileCacheTest {
                 "Two", new CacheEntry(SkinData.EMPTY, LookupStatus.NOT_FOUND, 10)));
         assertEquals(2, cache.size());
     }
+
+    @Test
+    void ttlsCanBeUpdatedInPlace() {
+        ProfileCache cache = new ProfileCache(1_000, 100);
+        cache.put("PixelRanger", new CacheEntry(new SkinData("value", "signature"), LookupStatus.FOUND, 100));
+        assertTrue(cache.get("PixelRanger", 500).isPresent());
+        cache.setTtls(200, 50);
+        assertTrue(cache.get("PixelRanger", 500).isEmpty());
+        cache.prune(500);
+        assertEquals(0, cache.size());
+    }
 }

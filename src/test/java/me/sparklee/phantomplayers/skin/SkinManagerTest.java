@@ -21,6 +21,7 @@ class SkinManagerTest {
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
     private final AtomicLong clock = new AtomicLong(1_000L);
     private final List<String> warnings = new ArrayList<>();
+    private final List<Long> backoffDelays = new ArrayList<>();
     private final AtomicInteger cacheChanges = new AtomicInteger();
     private SkinManager manager;
 
@@ -33,8 +34,13 @@ class SkinManagerTest {
     }
 
     private SkinManager manager(ProfileLookup lookup, SkinData fallback) {
-        manager = new SkinManager(new ProfileCache(60_000, 1_000), lookup, executor, 2,
-                clock::get, () -> fallback, warnings::add, cacheChanges::incrementAndGet);
+        return manager(lookup, fallback, 0, 0L);
+    }
+
+    private SkinManager manager(ProfileLookup lookup, SkinData fallback, int retryAttempts, long retryBackoff) {
+        manager = new SkinManager(new ProfileCache(60_000, 1_000), lookup, executor, 2, retryAttempts,
+                retryBackoff, backoffDelays::add, clock::get, () -> fallback, warnings::add,
+                cacheChanges::incrementAndGet);
         return manager;
     }
 
@@ -106,6 +112,49 @@ class SkinManagerTest {
     }
 
     @Test
+    void retriesTransientErrorsWithExponentialBackoff() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        ProfileLookup lookup = name -> {
+            if (calls.incrementAndGet() < 3) {
+                return LookupOutcome.error("temporary outage");
+            }
+            return LookupOutcome.found(new SkinData("texture", "signature"));
+        };
+        SkinManager skinManager = manager(lookup, SkinData.EMPTY, 2, 100L);
+        assertEquals("texture", skinManager.resolve("Flaky").get(2, TimeUnit.SECONDS).value());
+        assertEquals(3, calls.get());
+        assertEquals(List.of(100L, 200L), backoffDelays);
+        assertTrue(warnings.isEmpty());
+    }
+
+    @Test
+    void doesNotRetryMissingAccounts() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        ProfileLookup lookup = name -> {
+            calls.incrementAndGet();
+            return LookupOutcome.notFound("username is not registered");
+        };
+        SkinManager skinManager = manager(lookup, SkinData.EMPTY, 3, 50L);
+        skinManager.resolve("Nobody").get(2, TimeUnit.SECONDS);
+        assertEquals(1, calls.get());
+        assertTrue(backoffDelays.isEmpty());
+    }
+
+    @Test
+    void exhaustedRetriesFallBackAndWarnOnce() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        ProfileLookup lookup = name -> {
+            calls.incrementAndGet();
+            return LookupOutcome.error("still down");
+        };
+        SkinManager skinManager = manager(lookup, SkinData.EMPTY, 2, 10L);
+        assertEquals(SkinData.EMPTY, skinManager.resolve("Broken").get(2, TimeUnit.SECONDS));
+        assertEquals(3, calls.get());
+        assertEquals(List.of(10L, 20L), backoffDelays);
+        assertEquals(1, warnings.size());
+    }
+
+    @Test
     void prefilledCacheSkipsLookupEntirely() throws Exception {
         AtomicInteger calls = new AtomicInteger();
         ProfileCache cache = new ProfileCache(60_000, 1_000);
@@ -113,7 +162,7 @@ class SkinManagerTest {
         manager = new SkinManager(cache, name -> {
             calls.incrementAndGet();
             return LookupOutcome.error("should not run");
-        }, executor, 1, clock::get, () -> SkinData.EMPTY, warnings::add, () -> {
+        }, executor, 1, 0, 0L, backoffDelays::add, clock::get, () -> SkinData.EMPTY, warnings::add, () -> {
         });
         assertEquals("cached", manager.resolve("cached").get(2, TimeUnit.SECONDS).value());
         assertEquals(0, calls.get());

@@ -32,13 +32,12 @@ public final class SpawnService {
     private final SkinService skins;
     private final SchedulerService scheduler;
     private final Metrics metrics;
-    private final Runnable identitySaveRequest;
     private final Random random = new Random();
     private final AtomicBoolean spawnAllRunning = new AtomicBoolean();
 
     public SpawnService(ConfigManager config, PopulationRegistry registry, IdentityManager identities,
                         PresentationManager presentation, SkinService skins, SchedulerService scheduler,
-                        Metrics metrics, Runnable identitySaveRequest) {
+                        Metrics metrics) {
         this.config = config;
         this.registry = registry;
         this.identities = identities;
@@ -46,7 +45,6 @@ public final class SpawnService {
         this.skins = skins;
         this.scheduler = scheduler;
         this.metrics = metrics;
-        this.identitySaveRequest = identitySaveRequest;
     }
 
     public boolean spawn(String name, CommandSender sender) {
@@ -65,7 +63,6 @@ public final class SpawnService {
             return false;
         }
         FakeIdentity identity = identities.ensure(name);
-        identitySaveRequest.run();
         SpawnPoint point = pointAt(base, false);
         var active = registry.activate(identity, point, settings.population().maxActive());
         if (active.isEmpty()) {

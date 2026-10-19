@@ -93,6 +93,9 @@ public final class ConfigLoader {
                 errors);
         int requestTimeout = integer(configuration, "profiles.request-timeout-seconds", 5, 1, 30, errors);
         int maxConcurrentRequests = integer(configuration, "profiles.max-concurrent-requests", 2, 1, 8, errors);
+        int retryAttempts = integer(configuration, "profiles.retry-attempts", 2, 0, 5, errors);
+        long retryBackoff = longValue(configuration, "profiles.retry-backoff-millis", 1_500L, 0L, 30_000L,
+                errors);
         String fallbackValue = string(configuration, "profiles.fallback-skin.value", "", errors);
         String fallbackSignature = string(configuration, "profiles.fallback-skin.signature", "", errors);
         if ((fallbackValue == null || fallbackValue.isBlank())
@@ -102,20 +105,50 @@ public final class ConfigLoader {
         }
         SkinData fallbackSkin = new SkinData(fallbackValue, fallbackSignature);
 
-        boolean statusEnabled = bool(configuration, "server-status.enabled", true, errors);
-        String countModeText = string(configuration, "server-status.count-mode", "active", errors);
+        boolean pingEnabled = bool(configuration, "ping.enabled", true, errors);
+        int pingMinimum = integer(configuration, "ping.minimum-ms", 20, 0, 60_000, errors);
+        int pingMaximum = integer(configuration, "ping.maximum-ms", 220, 0, 60_000, errors);
+        if (pingMinimum > pingMaximum) {
+            errors.add("ping.minimum-ms must not be greater than ping.maximum-ms; using defaults");
+            pingMinimum = 20;
+            pingMaximum = 220;
+        }
+        int pingUpdateInterval = integer(configuration, "ping.update-interval-seconds", 30, 1, 3_600, errors);
+        boolean pingRandomizePerPlayer = bool(configuration, "ping.randomize-per-player", true, errors);
+        boolean pingVariation = bool(configuration, "ping.variation-enabled", true, errors);
+
+        String statusSection = configuration.isConfigurationSection("server-list") ? "server-list"
+                : configuration.isConfigurationSection("server-status") ? "server-status" : "server-list";
+        boolean legacyStatus = statusSection.equals("server-status");
+        boolean statusEnabled = bool(configuration, statusSection + ".enabled", true, errors);
+        boolean includeFakeCount = bool(configuration, statusSection + ".include-fake-count", true, errors);
+        String countModeText = string(configuration, statusSection + ".count-mode", "active", errors);
         StatusCountMode countMode = StatusCountMode.parse(countModeText);
         if (countModeText != null && !countMode.name().equalsIgnoreCase(countModeText.trim())
                 && !"active".equalsIgnoreCase(countModeText.trim())
                 && !"configured".equalsIgnoreCase(countModeText.trim())
                 && !"disabled".equalsIgnoreCase(countModeText.trim())) {
-            errors.add("server-status.count-mode must be one of: active, configured, disabled");
+            errors.add(statusSection + ".count-mode must be one of: active, configured, disabled");
         }
-        boolean sampleEnabled = bool(configuration, "server-status.sample.enabled", true, errors);
-        boolean includeRealPlayers = bool(configuration, "server-status.sample.include-real-players", true, errors);
-        int maxSampleEntries = integer(configuration, "server-status.sample.max-entries", 12, 0, 100, errors);
-        if (maxSampleEntries > MAX_SAMPLE_WARNING_THRESHOLD) {
-            warnings.add("server-status.sample.max-entries is greater than " + MAX_SAMPLE_WARNING_THRESHOLD
+        boolean includeFakeSampleNames;
+        boolean includeRealPlayers;
+        boolean sampleEnabled;
+        int sampleSize;
+        if (legacyStatus) {
+            boolean legacySampleEnabled = bool(configuration, "server-status.sample.enabled", true, errors);
+            includeFakeSampleNames = legacySampleEnabled;
+            includeRealPlayers = bool(configuration, "server-status.sample.include-real-players", true, errors);
+            sampleEnabled = legacySampleEnabled;
+            sampleSize = integer(configuration, "server-status.sample.max-entries", 12, 0, 100, errors);
+        } else {
+            includeFakeSampleNames = bool(configuration, "server-list.include-fake-sample-names", true, errors);
+            includeRealPlayers = bool(configuration, "server-list.include-real-players", true, errors);
+            sampleEnabled = true;
+            sampleSize = integer(configuration, "server-list.sample-size", 12, 0, 100, errors);
+        }
+        if (sampleSize > MAX_SAMPLE_WARNING_THRESHOLD) {
+            warnings.add(statusSection + (legacyStatus ? ".sample.max-entries" : ".sample-size")
+                    + " is greater than " + MAX_SAMPLE_WARNING_THRESHOLD
                     + "; the vanilla client only renders a small subset");
         }
 
@@ -134,9 +167,11 @@ public final class ConfigLoader {
                         new Settings.ConsoleSpawn(consoleWorld, consoleX, consoleY, consoleZ, consoleYaw, consolePitch)),
                 new Settings.Presentation(tabList, viewDistance, syncInterval, skinLayers, gravity),
                 new Settings.Profiles(profilesEnabled, cacheTtlHours, negativeCacheMinutes, requestTimeout,
-                        maxConcurrentRequests, fallbackSkin),
-                new Settings.ServerStatus(statusEnabled, countMode, sampleEnabled, includeRealPlayers,
-                        maxSampleEntries),
+                        maxConcurrentRequests, retryAttempts, retryBackoff, fallbackSkin),
+                new Settings.Ping(pingEnabled, pingMinimum, pingMaximum, pingUpdateInterval,
+                        pingRandomizePerPlayer, pingVariation),
+                new Settings.ServerList(statusEnabled, includeFakeCount, includeFakeSampleNames, countMode,
+                        includeRealPlayers, sampleEnabled, sampleSize),
                 new Settings.Chat(broadcastToConsole),
                 new Settings.Compatibility(allowUntested)
         );

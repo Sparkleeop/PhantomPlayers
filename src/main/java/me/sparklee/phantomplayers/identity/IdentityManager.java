@@ -18,13 +18,37 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Logger;
 
+/**
+ * Builds the identity list from {@code names.txt} and applies the optional overrides in
+ * {@code players.yml}. UUIDs are deterministic, so the override file never needs to contain the
+ * full roster; it only records names the administrator disabled or gave a custom UUID.
+ *
+ * <p>The previous generated format ({@code identities:} sections) is still read once and
+ * rewritten in the compact format on the next save.</p>
+ */
 public final class IdentityManager {
+
+    private static final List<String> HEADER = List.of(
+            "PhantomPlayers identity overrides (optional).",
+            "",
+            "names.txt is the spawn pool. This file only changes how individual",
+            "names behave, and it can be deleted at any time.",
+            "",
+            "disabled:",
+            "  Usernames excluded from /fp spawnall and configured counts.",
+            "uuids:",
+            "  Custom UUIDs for usernames. Values must be unique UUIDs."
+    );
 
     private final Path file;
     private final Logger logger;
     private final Map<String, FakeIdentity> identities = new LinkedHashMap<>();
     private final Set<String> spawnPool = new LinkedHashSet<>();
+    private final Set<String> disabled = new LinkedHashSet<>();
+    private final Map<String, UUID> customUuids = new LinkedHashMap<>();
+    private final Map<String, String> overrideNames = new LinkedHashMap<>();
     private boolean dirty;
+    private long version;
 
     public IdentityManager(Path dataFolder, Logger logger) {
         this.file = dataFolder.resolve("players.yml");
@@ -34,47 +58,27 @@ public final class IdentityManager {
     public synchronized void load(NamePool pool) {
         identities.clear();
         spawnPool.clear();
+        disabled.clear();
+        customUuids.clear();
+        overrideNames.clear();
         dirty = false;
+        version++;
 
         if (Files.exists(file)) {
             YamlConfiguration configuration = YamlConfiguration.loadConfiguration(file.toFile());
-            ConfigurationSection section = configuration.getConfigurationSection("identities");
-            if (section != null) {
-                for (String key : section.getKeys(false)) {
-                    ConfigurationSection entry = section.getConfigurationSection(key);
-                    if (entry == null) {
-                        logger.warning("players.yml: identity \"" + key + "\" is not a section; skipped");
-                        continue;
-                    }
-                    String name = entry.getString("name");
-                    String uuidText = entry.getString("uuid");
-                    if (!NameRules.isValid(name)) {
-                        logger.warning("players.yml: identity \"" + key + "\" has an invalid username; skipped");
-                        continue;
-                    }
-                    UUID uuid;
-                    try {
-                        uuid = UUID.fromString(uuidText);
-                    } catch (RuntimeException exception) {
-                        uuid = UuidUtil.deterministic(name);
-                        dirty = true;
-                        logger.warning("players.yml: identity \"" + name + "\" has an invalid UUID; regenerated");
-                    }
-                    boolean enabled = entry.getBoolean("enabled", true);
-                    String normalized = NameRules.key(name);
-                    if (identities.putIfAbsent(normalized, new FakeIdentity(name, uuid, enabled)) != null) {
-                        logger.warning("players.yml: duplicate identity \"" + name + "\" ignored");
-                    }
-                }
-            }
+            readLegacyIdentities(configuration);
+            readOverrides(configuration);
         }
 
         for (String name : pool.names()) {
             String key = NameRules.key(name);
             spawnPool.add(key);
-            if (!identities.containsKey(key)) {
-                identities.put(key, new FakeIdentity(name, UuidUtil.deterministic(name), true));
-                dirty = true;
+            overrideNames.putIfAbsent(key, name);
+            addIdentity(name);
+        }
+        for (Map.Entry<String, String> override : overrideNames.entrySet()) {
+            if (!identities.containsKey(override.getKey())) {
+                addIdentity(override.getValue());
             }
         }
     }
@@ -85,9 +89,11 @@ public final class IdentityManager {
         if (existing != null) {
             return existing;
         }
-        FakeIdentity created = new FakeIdentity(name, UuidUtil.deterministic(name), true);
+        FakeIdentity created = new FakeIdentity(name,
+                customUuids.getOrDefault(key, UuidUtil.deterministic(name)),
+                !disabled.contains(key));
         identities.put(key, created);
-        dirty = true;
+        version++;
         return created;
     }
 
@@ -138,25 +144,123 @@ public final class IdentityManager {
         return identities.size();
     }
 
+    public synchronized long version() {
+        return version;
+    }
+
     public synchronized boolean isDirty() {
         return dirty;
     }
 
     public synchronized void saveNow() throws IOException {
         YamlConfiguration configuration = new YamlConfiguration();
-        configuration.options().setHeader(List.of(
-                "PhantomPlayers persistent fake identities.",
-                "UUIDs are deterministic and may be edited, but must remain unique.",
-                "Set enabled to false to exclude an identity from spawnall and configured counts."
-        ));
-        ConfigurationSection section = configuration.createSection("identities");
-        for (FakeIdentity identity : identities.values()) {
-            ConfigurationSection entry = section.createSection(NameRules.key(identity.name()));
-            entry.set("name", identity.name());
-            entry.set("uuid", identity.uuid().toString());
-            entry.set("enabled", identity.enabled());
+        configuration.options().setHeader(HEADER);
+
+        List<String> disabledNames = new ArrayList<>(disabled.size());
+        for (String key : disabled) {
+            disabledNames.add(displayName(key));
+        }
+        if (!disabledNames.isEmpty()) {
+            configuration.set("disabled", disabledNames);
+        }
+        if (!customUuids.isEmpty()) {
+            ConfigurationSection section = configuration.createSection("uuids");
+            for (Map.Entry<String, UUID> entry : customUuids.entrySet()) {
+                section.set(displayName(entry.getKey()), entry.getValue().toString());
+            }
         }
         AtomicFiles.write(file, configuration.saveToString());
         dirty = false;
+    }
+
+    private void addIdentity(String name) {
+        String key = NameRules.key(name);
+        UUID uuid = customUuids.getOrDefault(key, UuidUtil.deterministic(name));
+        identities.put(key, new FakeIdentity(name, uuid, !disabled.contains(key)));
+    }
+
+    private void readLegacyIdentities(YamlConfiguration configuration) {
+        ConfigurationSection section = configuration.getConfigurationSection("identities");
+        if (section == null) {
+            return;
+        }
+        for (String key : section.getKeys(false)) {
+            ConfigurationSection entry = section.getConfigurationSection(key);
+            if (entry == null) {
+                logger.warning("players.yml: identity \"" + key + "\" is not a section; dropped");
+                dirty = true;
+                continue;
+            }
+            String name = entry.getString("name");
+            if (!NameRules.isValid(name)) {
+                logger.warning("players.yml: identity \"" + key + "\" has an invalid username; dropped");
+                dirty = true;
+                continue;
+            }
+            String normalized = NameRules.key(name);
+            String uuidText = entry.getString("uuid");
+            if (uuidText != null) {
+                try {
+                    UUID uuid = UUID.fromString(uuidText);
+                    if (!uuid.equals(UuidUtil.deterministic(name))) {
+                        customUuids.put(normalized, uuid);
+                    }
+                } catch (RuntimeException exception) {
+                    logger.warning("players.yml: identity \"" + name
+                            + "\" has an invalid UUID; using the deterministic UUID");
+                }
+            }
+            if (!entry.getBoolean("enabled", true)) {
+                disabled.add(normalized);
+            }
+            overrideNames.putIfAbsent(normalized, name);
+            dirty = true;
+        }
+    }
+
+    private void readOverrides(YamlConfiguration configuration) {
+        for (String raw : configuration.getStringList("disabled")) {
+            if (!NameRules.isValid(raw)) {
+                logger.warning("players.yml: disabled entry \"" + raw + "\" is not a valid username; ignored");
+                dirty = true;
+                continue;
+            }
+            String key = NameRules.key(raw);
+            disabled.add(key);
+            overrideNames.putIfAbsent(key, raw);
+        }
+
+        ConfigurationSection uuids = configuration.getConfigurationSection("uuids");
+        if (uuids == null) {
+            return;
+        }
+        for (String raw : uuids.getKeys(false)) {
+            if (!NameRules.isValid(raw)) {
+                logger.warning("players.yml: uuids entry \"" + raw + "\" is not a valid username; ignored");
+                dirty = true;
+                continue;
+            }
+            UUID uuid;
+            try {
+                uuid = UUID.fromString(String.valueOf(uuids.getString(raw)));
+            } catch (RuntimeException exception) {
+                logger.warning("players.yml: uuids entry \"" + raw + "\" is not a valid UUID; ignored");
+                dirty = true;
+                continue;
+            }
+            String key = NameRules.key(raw);
+            if (!uuid.equals(UuidUtil.deterministic(raw))) {
+                customUuids.put(key, uuid);
+            }
+            overrideNames.putIfAbsent(key, raw);
+        }
+    }
+
+    private String displayName(String key) {
+        FakeIdentity identity = identities.get(key);
+        if (identity != null) {
+            return identity.name();
+        }
+        return overrideNames.getOrDefault(key, key);
     }
 }

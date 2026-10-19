@@ -20,7 +20,7 @@ class StatusCounterTest {
         StatusCounter.Plan plan = StatusCounter.plan(StatusCountMode.ACTIVE, 5,
                 List.of(sample("RealOne"), sample("RealTwo")),
                 List.of(sample("FakeOne"), sample("FakeTwo"), sample("FakeThree")),
-                List.of(), true, true, 4);
+                List.of(), true, true, true, 4);
         assertEquals(8, plan.totalCount());
         assertEquals(3, plan.fakeCount());
         assertEquals(List.of("FakeOne", "FakeTwo", "FakeThree", "RealOne"),
@@ -31,7 +31,7 @@ class StatusCounterTest {
     void configuredModeUsesPersistedEnabledIdentities() {
         StatusCounter.Plan plan = StatusCounter.plan(StatusCountMode.CONFIGURED, 2,
                 List.of(sample("RealOne")), List.of(sample("ActiveOne")),
-                List.of(sample("SavedOne"), sample("SavedTwo")), true, true, 12);
+                List.of(sample("SavedOne"), sample("SavedTwo")), true, true, true, 12);
         assertEquals(4, plan.totalCount());
         assertEquals(2, plan.fakeCount());
         assertEquals("SavedOne", plan.samples().get(0).name());
@@ -41,7 +41,7 @@ class StatusCounterTest {
     void disabledModeLeavesRealPlayersOnly() {
         StatusCounter.Plan plan = StatusCounter.plan(StatusCountMode.DISABLED, 4,
                 List.of(sample("RealOne")), List.of(sample("FakeOne")), List.of(sample("SavedOne")),
-                true, true, 12);
+                true, true, true, 12);
         assertEquals(4, plan.totalCount());
         assertEquals(0, plan.fakeCount());
         assertEquals(List.of("RealOne"), plan.samples().stream().map(StatusSample::name).toList());
@@ -52,15 +52,36 @@ class StatusCounterTest {
         StatusCounter.Plan plan = StatusCounter.plan(StatusCountMode.ACTIVE, 1,
                 List.of(sample("RealOne")),
                 List.of(sample("FakeOne"), sample("fakeone"), sample("FakeTwo")),
-                List.of(), true, true, 2);
+                List.of(), true, true, true, 2);
         assertEquals(2, plan.samples().size());
         assertEquals("FakeOne", plan.samples().get(0).name());
     }
 
     @Test
+    void fakeCountCanBeExcludedWhileNamesRemain() {
+        StatusCounter.Plan plan = StatusCounter.plan(StatusCountMode.ACTIVE, 3,
+                List.of(sample("RealOne")), List.of(sample("FakeOne")), List.of(),
+                false, true, true, 12);
+        assertEquals(3, plan.totalCount());
+        assertEquals(0, plan.fakeCount());
+        assertEquals(List.of("FakeOne", "RealOne"),
+                plan.samples().stream().map(StatusSample::name).toList());
+    }
+
+    @Test
+    void fakeNamesCanBeHiddenWhileCountRemains() {
+        StatusCounter.Plan plan = StatusCounter.plan(StatusCountMode.ACTIVE, 3,
+                List.of(sample("RealOne")), List.of(sample("FakeOne")), List.of(),
+                true, false, true, 12);
+        assertEquals(4, plan.totalCount());
+        assertEquals(1, plan.fakeCount());
+        assertEquals(List.of("RealOne"), plan.samples().stream().map(StatusSample::name).toList());
+    }
+
+    @Test
     void sampleCanBeDisabledWithoutChangingCount() {
         StatusCounter.Plan plan = StatusCounter.plan(StatusCountMode.ACTIVE, 3,
-                List.of(sample("RealOne")), List.of(sample("FakeOne")), List.of(), false, true, 12);
+                List.of(sample("RealOne")), List.of(sample("FakeOne")), List.of(), true, true, true, 0);
         assertEquals(4, plan.totalCount());
         assertTrue(plan.samples().isEmpty());
     }
@@ -69,7 +90,7 @@ class StatusCounterTest {
     void realSamplesCanBeExcluded() {
         StatusCounter.Plan plan = StatusCounter.plan(StatusCountMode.ACTIVE, 1,
                 List.of(sample("RealOne")), List.of(sample("FakeOne"), sample("FakeTwo")), List.of(),
-                true, false, 12);
+                true, true, false, 12);
         assertEquals(List.of("FakeOne", "FakeTwo"),
                 plan.samples().stream().map(StatusSample::name).toList());
     }

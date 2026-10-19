@@ -18,6 +18,7 @@ public final class PopulationRegistry {
     private final Map<String, ActiveFakePlayer> active = new LinkedHashMap<>();
     private final Deque<String> recent = new ArrayDeque<>();
     private int recentMemory;
+    private long version;
 
     public PopulationRegistry(int recentMemory) {
         this.recentMemory = Math.max(0, recentMemory);
@@ -31,6 +32,7 @@ public final class PopulationRegistry {
         ActiveFakePlayer fake = new ActiveFakePlayer(identity, point);
         active.put(key, fake);
         remember(key);
+        version++;
         return Optional.of(fake);
     }
 
@@ -39,6 +41,7 @@ public final class PopulationRegistry {
         ActiveFakePlayer removed = active.remove(key);
         if (removed != null) {
             remember(key);
+            version++;
         }
         return Optional.ofNullable(removed);
     }
@@ -49,7 +52,14 @@ public final class PopulationRegistry {
         for (ActiveFakePlayer fake : removed) {
             remember(NameRules.key(fake.identity().name()));
         }
+        if (!removed.isEmpty()) {
+            version++;
+        }
         return List.copyOf(removed);
+    }
+
+    public synchronized long version() {
+        return version;
     }
 
     public synchronized Optional<ActiveFakePlayer> find(String name) {

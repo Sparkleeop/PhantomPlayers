@@ -7,6 +7,8 @@ import me.sparklee.phantomplayers.config.ConfigLoader;
 import me.sparklee.phantomplayers.config.ConfigManager;
 import me.sparklee.phantomplayers.config.Settings;
 import me.sparklee.phantomplayers.identity.IdentityManager;
+import me.sparklee.phantomplayers.integration.PlaceholderIntegration;
+import me.sparklee.phantomplayers.integration.PlaceholderStats;
 import me.sparklee.phantomplayers.metrics.Metrics;
 import me.sparklee.phantomplayers.names.NamePool;
 import me.sparklee.phantomplayers.names.NamePoolManager;
@@ -22,6 +24,7 @@ import me.sparklee.phantomplayers.presentation.PresentationManager;
 import me.sparklee.phantomplayers.presentation.StatusListener;
 import me.sparklee.phantomplayers.skin.SkinService;
 import me.sparklee.phantomplayers.util.Text;
+import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -30,11 +33,9 @@ import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
-
 public final class PhantomPlayers extends JavaPlugin {
 
     private final Metrics metrics = new Metrics();
-    private final AtomicBoolean identitySaveScheduled = new AtomicBoolean();
 
     private PlatformInfo platformInfo;
     private ConfigManager configManager;
@@ -47,6 +48,8 @@ public final class PhantomPlayers extends JavaPlugin {
     private PresentationManager presentation;
     private ChatManager chatManager;
     private SpawnService spawnService;
+    private PlaceholderIntegration placeholders;
+    private final AtomicBoolean placeholderLogged = new AtomicBoolean();
 
     @Override
     public void onEnable() {
@@ -123,8 +126,15 @@ public final class PhantomPlayers extends JavaPlugin {
         }
         chatManager.apply(chatResult.config(), settings.chat().broadcastToConsole());
 
+        placeholders = new PlaceholderIntegration(
+                getServer().getPluginManager().getPlugin("PlaceholderAPI") != null);
+        if (placeholders.install(this::placeholderStats, getDescription().getVersion(),
+                expansion -> expansion.register()) && placeholderLogged.compareAndSet(false, true)) {
+            getLogger().info("PlaceholderAPI expansion \"phantomplayers\" is registered.");
+        }
+
         spawnService = new SpawnService(configManager, registry, identityManager, presentation, skins, scheduler,
-                metrics, this::requestIdentitySave);
+                metrics);
         PhantomCommand command = new PhantomCommand(this, spawnService, registry, identityManager);
         PluginCommand pluginCommand = getCommand("fp");
         if (pluginCommand == null) {
@@ -142,13 +152,16 @@ public final class PhantomPlayers extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (placeholders != null) {
+            placeholders.uninstall();
+        }
         if (chatManager != null) {
             chatManager.stop();
         }
         if (presentation != null) {
             presentation.stop();
         }
-        if (identityManager != null) {
+        if (identityManager != null && identityManager.isDirty()) {
             try {
                 identityManager.saveNow();
             } catch (IOException exception) {
@@ -181,10 +194,12 @@ public final class PhantomPlayers extends JavaPlugin {
 
         configManager.apply(configResult.settings());
         identityManager.load(pool);
-        try {
-            identityManager.saveNow();
-        } catch (IOException exception) {
-            getLogger().warning("Unable to save players.yml: " + exception.getMessage());
+        if (identityManager.isDirty()) {
+            try {
+                identityManager.saveNow();
+            } catch (IOException exception) {
+                getLogger().warning("Unable to save players.yml: " + exception.getMessage());
+            }
         }
 
         Settings next = configResult.settings();
@@ -192,6 +207,11 @@ public final class PhantomPlayers extends JavaPlugin {
         presentation.updateSettings(next);
         skins.apply(next.profiles());
         chatManager.apply(chatResult.config(), next.chat().broadcastToConsole());
+        if (placeholders != null && placeholders.install(this::placeholderStats,
+                getDescription().getVersion(), expansion -> expansion.register())
+                && placeholderLogged.compareAndSet(false, true)) {
+            getLogger().info("PlaceholderAPI expansion \"phantomplayers\" is registered.");
+        }
         presentation.syncAll();
 
         sender.sendMessage(Text.success("Reloaded configuration, " + pool.size() + " pool names, "
@@ -224,22 +244,12 @@ public final class PhantomPlayers extends JavaPlugin {
         }
     }
 
-    public void requestIdentitySave() {
-        if (!identitySaveScheduled.compareAndSet(false, true)) {
-            return;
-        }
-        try {
-            scheduler.runAsync(() -> {
-                identitySaveScheduled.set(false);
-                try {
-                    identityManager.saveNow();
-                } catch (IOException exception) {
-                    getLogger().warning("Unable to save players.yml: " + exception.getMessage());
-                }
-            });
-        } catch (RuntimeException exception) {
-            identitySaveScheduled.set(false);
-        }
+    private PlaceholderStats placeholderStats() {
+        Settings current = settings();
+        int active = registry.activeCount();
+        int configured = identityManager.enabledCount();
+        return new PlaceholderStats(active, getServer().getOnlinePlayers().size(),
+                current.population().maxActive(), configured, active, Math.max(0, configured - active));
     }
 
     public Settings settings() {
@@ -288,5 +298,13 @@ public final class PhantomPlayers extends JavaPlugin {
 
     public SpawnService spawnService() {
         return spawnService;
+    }
+
+    public PlaceholderIntegration placeholders() {
+        return placeholders;
+    }
+
+    public PresentationManager presentation() {
+        return presentation;
     }
 }
