@@ -1,0 +1,100 @@
+# PhantomPlayers configuration
+# --------------------------------------------------------------------------
+# config-version is managed by the plugin. Do not edit it manually.
+# Missing keys fall back to built-in defaults; existing values are kept.
+# --------------------------------------------------------------------------
+config-version: 1
+
+population:
+  # Maximum number of simultaneously active fake players.
+  max-active: 100
+
+  # "spawnall" is processed in batches to avoid a large instantaneous load.
+  spawn-batch-size: 10
+  spawn-batch-delay-ticks: 20
+
+  # Number of recently active names that are avoided when selecting new
+  # identities for "spawnall", provided enough alternatives exist.
+  recent-name-memory: 50
+
+  # Spread spawnall locations around the origin on the horizontal plane.
+  spawn-spread:
+    enabled: true
+    radius: 6.0
+
+  # Used when "/fp spawn" or "/fp spawnall" is executed from the console.
+  # The world must be loaded when the command runs.
+  console-spawn:
+    world: world
+    x: 0.0
+    y: 64.0
+    z: 0.0
+    yaw: 0.0
+    pitch: 0.0
+
+presentation:
+  # Add the fake players to the global TAB player list for every viewer,
+  # regardless of their current world.
+  tab-list: true
+
+  # Fake player entities are only shown to viewers in the same world within
+  # this distance. TAB entries remain global.
+  entity-view-distance: 96
+
+  # How often (in server ticks; 20 = 1 second) viewer visibility is
+  # reconciled. 200 ticks = 10 seconds. Location-bound work is always
+  # scheduled on the owning entity/region scheduler.
+  sync-interval-ticks: 200
+
+  # Send the skin-layer metadata (hat/jacket/sleeves) when supported.
+  skin-layers: true
+
+  # Fake players are packet-only and have no real physics. When true, a
+  # simulated fall to the surface is animated with teleport packets after
+  # spawning. Set to false to keep them exactly at the spawn point.
+  gravity: true
+
+profiles:
+  # Username-based skin lookup. Uses the official Mojang profile endpoints.
+  # No credentials are required. Successful and negative results are cached.
+  enabled: true
+  cache-ttl-hours: 168
+  negative-cache-minutes: 10
+  request-timeout-seconds: 5
+  max-concurrent-requests: 2
+
+  # Optional fallback texture (base64 "value" and "signature" from a signed
+  # textures property). Leave empty to let the client render its default
+  # Steve/Alex skin when a lookup fails.
+  fallback-skin:
+    value: ""
+    signature: ""
+
+server-status:
+  enabled: true
+
+  # active     = real online players + currently active fake players
+  # configured = real online players + all enabled saved identities
+  # disabled   = real online players only
+  count-mode: active
+
+  sample:
+    enabled: true
+    # Keep the real players already supplied by the server in the sample.
+    include-real-players: true
+    # Maximum number of sample entries. The vanilla client only renders a
+    # small subset; values above 12 are not useful.
+    max-entries: 12
+
+chat:
+  # Simulated lines are delivered as plain server chat broadcasts. They are
+  # visually normal chat lines but are not signed player-chat packets.
+  # This is the only supported delivery mode.
+  delivery: broadcast
+  broadcast-to-console: true
+
+compatibility:
+  # When the exact server version has no verified adapter, the closest known
+  # mojmap packet adapter is used and a loud warning is logged. Set to false
+  # to refuse to start on unverified versions instead.
+  allow-untested-adapters: true

@@ -1,0 +1,106 @@
+# PhantomPlayers conversation configuration
+# --------------------------------------------------------------------------
+# Templates are shared by the whole fake population. You never need a
+# per-player conversation file. Placeholders {player1}, {player2}, ...
+# resolve to distinct active fake players. A line is broadcast exactly as
+# written after placeholder substitution.
+# --------------------------------------------------------------------------
+settings:
+  enabled: true
+  min-delay-seconds: 8
+  max-delay-seconds: 35
+  conversation-cooldown-seconds: 60
+  max-concurrent-conversations: 3
+  max-lines-per-conversation: 8
+
+selection:
+  randomize-delays: true
+  avoid-same-speaker-consecutively: true
+  avoid-repeating-template: true
+
+templates:
+  greetings:
+    weight: 5
+    lines:
+      - "{player1}: hey"
+      - "{player2}: sup"
+      - "{player1}: not much, just wandering around"
+
+  server-chat:
+    weight: 10
+    lines:
+      - "{player1}: anyone online?"
+      - "{player2}: yeah just chilling"
+      - "{player1}: nice"
+
+  gameplay:
+    weight: 8
+    lines:
+      - "{player1}: what are you guys playing?"
+      - "{player2}: probably some survival"
+      - "{player3}: sounds good"
+
+  mining:
+    weight: 6
+    lines:
+      - "{player1}: found a huge cave system"
+      - "{player2}: any diamonds?"
+      - "{player1}: a few, mostly copper though"
+      - "{player3}: copper is underrated"
+
+  building:
+    weight: 6
+    lines:
+      - "{player1}: working on a new base"
+      - "{player2}: what style?"
+      - "{player1}: mostly spruce and stone"
+      - "{player2}: classic, I like it"
+
+  exploring:
+    weight: 5
+    lines:
+      - "{player1}: has anyone been past the eastern mountains?"
+      - "{player2}: once, it is mostly taiga"
+      - "{player1}: worth the trip?"
+
+  trading:
+    weight: 4
+    lines:
+      - "{player1}: does anyone have spare emeralds?"
+      - "{player2}: I can trade a few"
+      - "{player1}: deal"
+
+  weather:
+    weight: 3
+    lines:
+      - "{player1}: is it raining for everyone else?"
+      - "{player2}: yeah, all morning"
+      - "{player3}: good for the crops"
+
+  farms:
+    weight: 4
+    lines:
+      - "{player1}: my iron farm finally works"
+      - "{player2}: how many villagers?"
+      - "{player1}: three, it is small but steady"
+
+  late-night:
+    weight: 3
+    lines:
+      - "{player1}: still awake?"
+      - "{player2}: unfortunately"
+      - "{player1}: same, one more build"
+
+  redstone:
+    weight: 4
+    lines:
+      - "{player1}: why is my door opening the wrong way"
+      - "{player2}: check the repeater delay"
+      - "{player1}: that was it, thanks"
+
+  pets:
+    weight: 3
+    lines:
+      - "{player1}: my wolf keeps sitting in the doorway"
+      - "{player2}: at least it is not a cat on the furnace"
+      - "{player3}: both are valid roommates"

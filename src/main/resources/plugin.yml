@@ -1,0 +1,36 @@
+name: PhantomPlayers
+version: '1.0.0'
+main: me.sparklee.phantomplayers.PhantomPlayers
+api-version: '1.21'
+folia-supported: true
+description: Configuration-driven fake-player population for Paper and Folia.
+author: sparklee
+commands:
+  fp:
+    description: PhantomPlayers management
+    usage: /fp <spawn|spawnall|despawn|despawnall|list|reload>
+permissions:
+  phantomplayers.spawn:
+    description: Spawn one fake player or the whole population
+    default: op
+  phantomplayers.despawn:
+    description: Despawn a single fake player
+    default: op
+  phantomplayers.despawnall:
+    description: Despawn every active fake player
+    default: op
+  phantomplayers.list:
+    description: View population statistics
+    default: op
+  phantomplayers.reload:
+    description: Reload configuration, names, and chat templates
+    default: op
+  phantomplayers.admin:
+    description: Grants all PhantomPlayers permissions
+    default: op
+    children:
+      phantomplayers.spawn: true
+      phantomplayers.despawn: true
+      phantomplayers.despawnall: true
+      phantomplayers.list: true
+      phantomplayers.reload: true
